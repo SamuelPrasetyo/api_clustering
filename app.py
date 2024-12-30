@@ -1,13 +1,17 @@
+# Import Algoritma kmeans.py
+from kmeans import k_means_clustering, evaluate_clustering_kmeans, find_optimal_k_sklearn
+
+# Import Algoritma dbscan.py
+from dbscan import DBSCAN, find_optimal_dbscan_params, evaluate_clustering_dbscan, plot_k_distance_graph
+
+# Import Algoritma agglomerative.py
+from agglomerative import agglomerative_clustering, evaluate_clustering_agglomerative, calculate_centroids, calculate_sse
+
 from flask import Flask, request, jsonify
 import pandas as pd
 import numpy as np
-from scipy.spatial.distance import cdist
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
-
-from sklearn.cluster import KMeans
-import matplotlib.pyplot as plt
-from sklearn.metrics import silhouette_score, davies_bouldin_score, calinski_harabasz_score
 
 app = Flask(__name__)
 CORS(app)
@@ -68,97 +72,10 @@ def get_data_from_db():
 
 
 
-# Fungsi memproses file excel
-def process_file(file_path):
-    df = pd.read_excel(file_path)
-    selected_columns = df.columns[5:]  # Ambil kolom dari F dan seterusnya
-    for column in selected_columns:
-        df[column] = pd.to_numeric(df[column], errors='coerce')
-    if df[selected_columns].isnull().any().any():
-        return "Error: Beberapa nilai tidak valid (mungkin ada teks yang tidak bisa diubah menjadi angka)."
-    return df[selected_columns]
-
-# Fungsi menghitung Euclidean Distance
-def euclidean_distance(point, centroids):
-    return np.sqrt(np.sum((point - centroids) ** 2, axis=1))
-
-# Inisialisasi centroid dengan K-Means++
-def initialize_centroids(data, k):
-    np.random.seed(42)
-    n_samples = data.shape[0]
-    centroids = []
-
-    # Pilih pusat pertama secara acak
-    centroids.append(data[np.random.randint(0, n_samples)])
-
-    # Pilih sisa pusat dengan probabilitas proporsional terhadap jarak
-    for _ in range(1, k):
-        distances = np.min(cdist(data, np.array(centroids), metric="euclidean"), axis=1)
-        probabilities = distances ** 2 / np.sum(distances ** 2)
-        new_centroid_idx = np.random.choice(n_samples, p=probabilities)
-        centroids.append(data[new_centroid_idx])
-
-    return np.array(centroids)
-
-# Fungsi K-Means
-def k_means_clustering(data, k, max_iters=100):
-    centroids = initialize_centroids(data, k)
-    for _ in range(max_iters):
-        clusters = []
-        for point in data:
-            distances = euclidean_distance(point, centroids)
-            cluster = np.argmin(distances)
-            clusters.append(cluster)
-        clusters = np.array(clusters)
-
-        new_centroids = []
-        for i in range(k):
-            cluster_points = data[clusters == i]
-            if len(cluster_points) > 0:
-                new_centroid = np.mean(cluster_points, axis=0)
-                new_centroids.append(new_centroid)
-            else:
-                new_centroids.append(centroids[i])
-        new_centroids = np.array(new_centroids)
-
-        if np.all(centroids == new_centroids):
-            break
-        centroids = new_centroids
-
-    return centroids, clusters
-
-# Fungsi Elbow Method
-def find_optimal_k(data, max_k=10):
-    distortions = []
-    for k in range(1, max_k + 1):
-        centroids, clusters = k_means_clustering(data, k)
-        intra_cluster_distances = np.min(cdist(data, centroids, 'euclidean'), axis=1)
-        distortions.append(np.sum(intra_cluster_distances ** 2))
-    return distortions
-
-# Fungsi Elbow Method menggunakan sklearn
-def find_optimal_k_sklearn(data, max_k=10):
-    distortions = []
-    for k in range(1, max_k + 1):
-        kmeans = KMeans(n_clusters=k, init='k-means++', random_state=42)
-        kmeans.fit(data)
-        distortions.append(kmeans.inertia_)  # inertia_ adalah sum of squared distances (distorsi)
-    
-    # Visualisasi elbow curve
-    plt.figure(figsize=(8, 5))
-    plt.plot(range(1, max_k + 1), distortions, marker='o')
-    plt.title('Elbow Method')
-    plt.xlabel('Number of Clusters (k)')
-    plt.ylabel('Distortion')
-    plt.grid(True)
-    plt.show()
-
-    return distortions
-
-@app.route('/kmeans', methods=['POST'])
-def kmeans():
+@app.route('/elbow-method', methods=['POST'])
+def elbow_method():
     try:
-        # Ambil parameter tahun ajar dan semester dari request
+        # Ambil parameter dari request
         data = request.get_json()
         tahunajar = data.get('tahunajar')
         semester = data.get('semester')
@@ -173,9 +90,70 @@ def kmeans():
         
         if df.empty:
             return jsonify({'error': 'Tidak ada data untuk tahun ajar dan semester yang dipilih.'}), 400
+
+        # Pastikan kolom metadata tersedia
+        metadata_columns = ['Semester', 'Tahun Ajar', 'Kelas', 'NIS', 'Nama Siswa']
+        clustering_columns = df.columns.difference(metadata_columns)
+
+        # Pisahkan metadata dan data numerik untuk clustering
+        clustering_data = df[clustering_columns]
+
+        # Pastikan data numerik valid
+        for column in clustering_columns:
+            clustering_data.loc[:, column] = pd.to_numeric(clustering_data[column], errors='coerce')
         
-        # Cetak nama kolom untuk debug
-        print("Nama kolom dalam DataFrame:", df.columns.tolist())
+        # Filter baris yang memiliki nilai null atau NaN
+        valid_data_mask = ~clustering_data.isnull().any(axis=1)
+        clustering_data = clustering_data[valid_data_mask]
+
+        # Filter baris yang memiliki nilai `-`
+        invalid_characters_mask = ~(clustering_data.apply(lambda row: any(str(x).strip() == '-' for x in row), axis=1))
+        clustering_data = clustering_data[invalid_characters_mask]
+
+        # Pastikan tidak ada data kosong setelah filtering
+        if clustering_data.empty:
+            return jsonify({'error': 'Semua data tidak valid untuk analisis.'}), 400
+        
+        # Jalankan Elbow Method
+        data = clustering_data.values
+        plot_url, distortions = find_optimal_k_sklearn(data)
+
+        # Kembalikan hasil
+        return jsonify({
+            "plot": plot_url,
+            "distortions": distortions
+        })
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+
+@app.route('/kmeans', methods=['POST'])
+def kmeans():
+    try:
+        # Ambil parameter tahun ajar dan semester dari request
+        data = request.get_json()
+        tahunajar = data.get('tahunajar')
+        semester = data.get('semester')
+        n_clusters = data.get('n_clusters')
+        
+        # Validasi parameter
+        if not tahunajar or not semester or not n_clusters:
+            return jsonify({'error': 'Parameter tahunajar, semester, dan n_clusters harus disediakan.'}), 400
+        
+         # Validasi n_clusters adalah bilangan positif
+        try:
+            n_clusters = int(n_clusters)
+            if n_clusters <= 0:
+                raise ValueError
+        except ValueError:
+            return jsonify({'error': 'Parameter n_clusters harus berupa bilangan bulat positif.'}), 400
+        
+        # Filter data berdasarkan tahunajar dan semester
+        df = get_data_from_db()
+        df = df[(df['Tahun Ajar'] == tahunajar) & (df['Semester'] == semester)]
+        
+        if df.empty:
+            return jsonify({'error': 'Tidak ada data untuk tahun ajar dan semester yang dipilih.'}), 400
 
         # Pastikan kolom metadata tersedia
         metadata_columns = ['Semester', 'Tahun Ajar', 'Kelas', 'NIS', 'Nama Siswa']
@@ -205,19 +183,13 @@ def kmeans():
         
         # Jalankan K-Means
         data = clustering_data.values
-        optimal_k = 3  # Atau gunakan metode untuk menentukan optimal_k
-        centroids, clusters = k_means_clustering(data, optimal_k)
+        centroids, clusters = k_means_clustering(data, n_clusters)
+        
+        # Evaluasi hasil clustering
+        evaluation = evaluate_clustering_kmeans(data, clusters, centroids)
 
         # Tambahkan hasil clustering ke DataFrame metadata
         metadata['Cluster'] = clusters
-
-        # Evaluasi hasil clustering
-        silhouette_avg = silhouette_score(data, clusters)
-        davies_bouldin = davies_bouldin_score(data, clusters)
-        calinski_harabasz = calinski_harabasz_score(data, clusters)
-        
-        # Hitung Sum of Squared Error (SSE)
-        sse = np.sum(np.min(cdist(data, centroids, 'euclidean') ** 2, axis=1))
 
         # Gabungkan metadata dengan hasil clustering
         result_df = pd.concat([metadata, clustering_data], axis=1)
@@ -229,82 +201,225 @@ def kmeans():
         return jsonify({
             "data": result_df.to_dict(orient='records'),
             "final_centroids": centroids.tolist(),
-            "optimal_k": optimal_k,
-            "silhouette_score": silhouette_avg,
-            "davies_bouldin_index": davies_bouldin,
-            "calinski_harabasz_index": calinski_harabasz,
-            "sum_squared_error": sse
+            "n_clusters": n_clusters,
+            "evaluation": evaluation
         })
 
     except Exception as e:
         return jsonify({'error': str(e)}), 400
+
+
+
+@app.route('/find-params', methods=['POST'])
+def find_params():
+    try:
+        # Ambil data request
+        data = request.get_json()
+        eps_range = np.arange(data.get('eps_min', 7), data.get('eps_max', 10), data.get('eps_step', 0.5))
+        min_pts_range = range(data.get('min_pts_min', 12), data.get('min_pts_max', 22), data.get('min_pts_step', 5))
+
+        # Ambil data dari database
+        df = get_data_from_db()
+        tahunajar = data.get('tahunajar')
+        semester = data.get('semester')
+        df = df[(df['Tahun Ajar'] == tahunajar) & (df['Semester'] == semester)]
+
+        # Metadata dan clustering columns
+        metadata_columns = ['Semester', 'Tahun Ajar', 'Kelas', 'NIS', 'Nama Siswa']
+        clustering_columns = df.columns.difference(metadata_columns)
+
+        clustering_data = df[clustering_columns]
+        for column in clustering_columns:
+            clustering_data.loc[:, column] = pd.to_numeric(clustering_data[column], errors='coerce')
+
+        clustering_data = clustering_data.dropna()
+        data_array = clustering_data.values
+
+        # Panggil fungsi plotting dari dbscan.py
+        k_distance_plot = plot_k_distance_graph(data_array)
+        
+        # Temukan parameter optimal
+        results = find_optimal_dbscan_params(data_array, eps_range, min_pts_range)
+
+        return jsonify({
+            'results': results, 
+            'k_distance_plot': f'data:image/png;base64,{k_distance_plot}'
+        })
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+
+@app.route('/dbscan', methods=['POST'])
+def dbscan():
+    try:
+        # Ambil parameter dari request
+        data = request.get_json()
+        tahunajar = data.get('tahunajar')
+        semester = data.get('semester')
+        eps = data.get('eps')
+        min_pts = data.get('min_pts')
+        
+        # Validasi parameter
+        if not tahunajar or not semester or eps is None or min_pts is None:
+            return jsonify({'error': 'Parameter tahunajar, semester, eps, dan min_pts harus disediakan.'}), 400
+        
+        # Validasi eps dan min_pts adalah angka valid
+        try:
+            eps = float(eps)
+            min_pts = int(min_pts)
+            if eps <= 0 or min_pts <= 0:
+                raise ValueError
+        except ValueError:
+            return jsonify({'error': 'Parameter eps harus berupa angka positif dan min_pts harus berupa bilangan bulat positif.'}), 400
+        
+        # Ambil data dari database
+        df = get_data_from_db()
+        df = df[(df['Tahun Ajar'] == tahunajar) & (df['Semester'] == semester)]
+        
+        if df.empty:
+            return jsonify({'error': 'Tidak ada data untuk tahun ajar dan semester yang dipilih.'}), 400
+
+        # Metadata dan clustering columns
+        metadata_columns = ['Semester', 'Tahun Ajar', 'Kelas', 'NIS', 'Nama Siswa']
+        clustering_columns = df.columns.difference(metadata_columns)
+
+        # Pisahkan metadata dan data numerik
+        metadata = df[metadata_columns]
+        clustering_data = df[clustering_columns]
+
+        # Validasi data numerik
+        for column in clustering_columns:
+            clustering_data.loc[:, column] = pd.to_numeric(clustering_data[column], errors='coerce')
+        
+        # Filter nilai NaN
+        valid_data_mask = ~clustering_data.isnull().any(axis=1)
+        clustering_data = clustering_data[valid_data_mask]
+        metadata = metadata[valid_data_mask]
+
+        # Filter nilai `-`
+        invalid_characters_mask = ~(clustering_data.applymap(lambda x: str(x).strip() == '-').any(axis=1))
+        clustering_data = clustering_data[invalid_characters_mask]
+        metadata = metadata[invalid_characters_mask]
+
+        # Pastikan tidak ada data kosong setelah filtering
+        if clustering_data.empty:
+            return jsonify({'error': 'Semua data tidak valid untuk clustering setelah memfilter nilai null atau -.'}), 400
+
+        # Konversi data ke numpy array untuk DBSCAN
+        data = clustering_data.values
+
+        # Inisialisasi dan jalankan DBSCAN
+        dbscan = DBSCAN(eps=eps, min_pts=min_pts)
+        labels = dbscan.fit(data)
+
+        # Tambahkan hasil clustering ke metadata
+        metadata['Cluster'] = labels
+
+        # Evaluasi hasil clustering
+        evaluation = evaluate_clustering_dbscan(data, labels)
+
+        # Gabungkan metadata dan hasil clustering
+        result_df = pd.concat([metadata, clustering_data], axis=1)
+        result_df = result_df.sort_values(by=['Cluster', 'Kelas'])
+
+        # Konversi hasil ke JSON
+        response = {
+            "evaluation": evaluation,
+            # "sum_squared_error": sse,
+            "data": result_df.to_dict(orient='records')
+        }
+        return jsonify(response)
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400    
+
+
+@app.route('/agglomerative', methods=['POST'])
+def agglomerative():
+    try:
+        data = request.get_json()
+
+        if not data:
+            return jsonify({'error': 'Request body harus berupa JSON.'}), 400
+
+        tahunajar = data.get('tahunajar')
+        semester = data.get('semester')
+        n_clusters = int(data.get('n_clusters', 3))  # Default to 3 clusters if not specified
+
+        # Validasi parameter
+        if not tahunajar or not semester:
+            return jsonify({'error': 'Parameter tahunajar dan semester harus disediakan.'}), 400
+
+        # Filter data berdasarkan tahunajar dan semester
+        df = get_data_from_db()
+        df = df[(df['Tahun Ajar'] == tahunajar) & (df['Semester'] == semester)]
+
+        if df.empty:
+            return jsonify({'error': 'Data tidak ditemukan untuk parameter yang diberikan.'}), 404
+
+        # Pastikan kolom metadata tersedia
+        metadata_columns = ['Semester', 'Tahun Ajar', 'Kelas', 'NIS', 'Nama Siswa']
+        clustering_columns = df.columns.difference(metadata_columns)
+
+        # Pisahkan metadata dan data numerik untuk clustering
+        metadata = df[metadata_columns]
+        clustering_data = df[clustering_columns]
+
+        # Konversi data ke numerik
+        clustering_data = clustering_data.apply(pd.to_numeric, errors='coerce')
+
+        # Drop NaN dan invalid values
+        clustering_data = clustering_data.dropna()
+        metadata = metadata.loc[clustering_data.index]
+
+        # Pastikan data tidak kosong setelah pembersihan
+        if clustering_data.empty:
+            return jsonify({'error': 'Data tidak valid untuk clustering setelah memfilter nilai null atau invalid.'}), 400
+
+        # Jalankan Agglomerative Clustering
+        clustering_data_values = clustering_data.values
+        labels = agglomerative_clustering(clustering_data_values, n_clusters)
+
+        # Evaluasi Clustering
+        evaluation = evaluate_clustering_agglomerative(clustering_data, labels)
+        
+        # Tambahkan centroid setiap cluster untuk analisis
+        centroids = {}
+        unique_labels = np.unique(labels)
+        for cluster_id in unique_labels:
+            cluster_points = clustering_data[labels == cluster_id]
+            centroid = cluster_points.mean(axis=0)
+            centroids[cluster_id] = centroid
+
+        # Tambahkan centroid ke hasil evaluasi untuk analisis lebih lanjut
+        centroids = calculate_centroids(clustering_data, labels)
+
+        # Hitung SSE
+        sse = calculate_sse(clustering_data, labels, n_clusters)
+
+        # Tambahkan hasil clustering ke metadata
+        metadata['Cluster'] = labels
+
+        # Gabungkan metadata dengan hasil clustering
+        result_df = pd.concat([metadata, clustering_data], axis=1)
+
+        # Sorting berdasarkan Nama Siswa
+        result_df = result_df.sort_values(by=['Cluster', 'Kelas'])
+
+        # Kembalikan hasil
+        return jsonify({
+            "data": result_df.to_dict(orient='records'),
+            "centroids": centroids,
+            "evaluation": {
+                **evaluation,
+                "sum_squared_error": sse
+            }
+        })
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500    
     
+
+
 if __name__ == '__main__':
     app.run(debug=True)
-    
-# @app.route('/kmeans', methods=['POST'])
-# def kmeans():
-#     try:
-#         # Ambil file yang dikirim dari request
-#         file = request.files['file']
-
-#         # Simpan file sementara di server
-#         file_path = "temp_file.xlsx"
-#         file.save(file_path)
-
-#         # Proses file
-#         df = pd.read_excel(file_path)
-
-#         # Pastikan kolom metadata tersedia
-#         metadata_columns = ['Semester', 'Tahun Ajar', 'Kelas', 'NIS', 'Nama Siswa']
-#         clustering_columns = df.columns.difference(metadata_columns)
-
-#         # Pisahkan metadata dan data numerik untuk clustering
-#         metadata = df[metadata_columns]
-#         clustering_data = df[clustering_columns]
-
-#         # Pastikan data numerik valid
-#         for column in clustering_columns:
-#             clustering_data[column] = pd.to_numeric(clustering_data[column], errors='coerce')
-        
-#         if clustering_data.isnull().any().any():
-#             return jsonify({'error': 'Beberapa nilai tidak valid dalam data clustering.'}), 400
-        
-#         # Jalankan K-Means
-#         data = clustering_data.values
-#         optimal_k = 3  # Atau gunakan metode untuk menentukan optimal_k
-#         centroids, clusters = k_means_clustering(data, optimal_k)
-
-#         # Tambahkan hasil clustering ke DataFrame metadata
-#         metadata['Cluster'] = clusters
-
-#         # Evaluasi hasil clustering
-#         silhouette_avg = silhouette_score(data, clusters)
-#         davies_bouldin = davies_bouldin_score(data, clusters)
-#         calinski_harabasz = calinski_harabasz_score(data, clusters)
-        
-#         # Hitung Sum of Squared Error (SSE)
-#         sse = np.sum(np.min(cdist(data, centroids, 'euclidean') ** 2, axis=1))
-
-#         # Gabungkan metadata dengan hasil clustering
-#         result_df = pd.concat([metadata, clustering_data], axis=1)
-        
-#         # Sorting berdasarkan Nama Siswa
-#         result_df = result_df.sort_values(by=['Kelas', 'Semester', 'Cluster'])
-
-#         # Kembalikan hasil
-#         return jsonify({
-#             "data": result_df.to_dict(orient='records'),
-#             "final_centroids": centroids.tolist(),
-#             "optimal_k": optimal_k,
-#             "silhouette_score": silhouette_avg,
-#             "davies_bouldin_index": davies_bouldin,
-#             "calinski_harabasz_index": calinski_harabasz,
-#             "sum_squared_error": sse
-#         })
-
-#     except Exception as e:
-#         return jsonify({'error': str(e)}), 400
-    
-# if __name__ == '__main__':
-#     app.run(debug=True)
