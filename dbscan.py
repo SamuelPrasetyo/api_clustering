@@ -90,6 +90,35 @@ def calculate_sse(data, labels):
         sse += np.sum((cluster_points - centroid) ** 2)
     return sse
 
+def calculate_centroids(data, labels):
+    """
+    Menghitung centroid dari setiap kluster yang dihasilkan oleh DBSCAN.
+
+    Parameters:
+        data (np.ndarray): Data clustering dalam bentuk array (dimensi 2).
+        labels (list or np.ndarray): Label hasil clustering DBSCAN untuk setiap titik data.
+
+    Returns:
+        dict: Dictionary yang berisi centroid untuk setiap kluster dalam format {cluster_id: centroid_array}.
+    """
+    unique_labels = set(labels)
+    centroids = {}
+
+    for label in unique_labels:
+        if label == -1:  # Abaikan noise (label -1)
+            continue
+
+        # Ambil data untuk kluster tertentu
+        cluster_points = data[np.array(labels) == label]
+
+        # Hitung centroid sebagai rata-rata dari semua titik dalam kluster
+        centroid = np.mean(cluster_points, axis=0)
+
+        # Simpan centroid ke dalam dictionary
+        centroids[label] = centroid
+
+    return centroids
+
 def evaluate_clustering_dbscan(data, labels):
     if len(set(labels)) > 1:  # Jika terdapat lebih dari 1 klaster (selain outlier)
         silhouette = silhouette_score(data, labels) if -1 in labels else 0

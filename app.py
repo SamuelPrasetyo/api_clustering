@@ -2,7 +2,7 @@
 from kmeans import k_means_clustering, evaluate_clustering_kmeans, find_optimal_k_sklearn
 
 # Import Algoritma dbscan.py
-from dbscan import DBSCAN, find_optimal_dbscan_params, evaluate_clustering_dbscan, plot_k_distance_graph
+from dbscan import DBSCAN, find_optimal_dbscan_params, evaluate_clustering_dbscan, plot_k_distance_graph, calculate_centroids
 
 # Import Algoritma agglomerative.py
 from agglomerative import agglomerative_clustering, evaluate_clustering_agglomerative, calculate_centroids, calculate_sse
@@ -216,7 +216,7 @@ def find_params():
         # Ambil data request
         data = request.get_json()
         eps_range = np.arange(data.get('eps_min', 7), data.get('eps_max', 10), data.get('eps_step', 0.5))
-        min_pts_range = range(data.get('min_pts_min', 12), data.get('min_pts_max', 22), data.get('min_pts_step', 5))
+        min_pts_range = range(data.get('min_pts_min', 12), data.get('min_pts_max', 22), data.get('min_pts_step', 1))
 
         # Ambil data dari database
         df = get_data_from_db()
@@ -314,6 +314,9 @@ def dbscan():
 
         # Tambahkan hasil clustering ke metadata
         metadata['Cluster'] = labels
+        
+        # Hitung centroid setiap kluster
+        centroids = calculate_centroids(data, labels)
 
         # Evaluasi hasil clustering
         evaluation = evaluate_clustering_dbscan(data, labels)
@@ -326,6 +329,7 @@ def dbscan():
         response = {
             "evaluation": evaluation,
             # "sum_squared_error": sse,
+            "centroids": centroids,  # Konversi centroids ke JSON-friendly format
             "data": result_df.to_dict(orient='records')
         }
         return jsonify(response)
