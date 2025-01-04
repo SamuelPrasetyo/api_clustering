@@ -7,6 +7,9 @@ from dbscan import DBSCAN, find_optimal_dbscan_params, evaluate_clustering_dbsca
 # Import Algoritma agglomerative.py
 from agglomerative import agglomerative_clustering, evaluate_clustering_agglomerative, calculate_centroids, calculate_sse
 
+# Import Library Evaluasi
+from sklearn.metrics import silhouette_score, davies_bouldin_score, calinski_harabasz_score
+
 from flask import Flask, request, jsonify
 import pandas as pd
 import numpy as np
@@ -423,6 +426,577 @@ def agglomerative():
     except Exception as e:
         return jsonify({'error': str(e)}), 500    
     
+# @app.route('/hasil-perbandingan', methods=['POST'])
+# def hasil_perbandingan():
+    try:
+        # Ambil data dari database
+        df = get_data_from_db()
+        
+        if df.empty:
+            return jsonify({'error': 'Tidak ada data untuk tahun ajar dan semester yang dipilih.'}), 400
+
+        # Variasi Tahun Ajar dan Semester
+        tahun_ajar_list = ['20212022', '20222023', '20232024']
+        semester_list = ['Gasal', 'Genap']
+
+        # Metadata dan clustering columns
+        metadata_columns = ['Semester', 'Tahun Ajar', 'Kelas', 'NIS', 'Nama Siswa']
+        clustering_columns = df.columns.difference(metadata_columns)
+
+        # Pisahkan metadata dan data numerik untuk clustering
+        metadata = df[metadata_columns]
+        clustering_data = df[clustering_columns]
+        
+        # Pastikan data numerik valid
+        for column in clustering_columns:
+            clustering_data[column] = pd.to_numeric(clustering_data[column], errors='coerce')
+
+        # Filter baris yang memiliki nilai null atau NaN
+        valid_data_mask = ~clustering_data.isnull().any(axis=1)  # True untuk baris tanpa NaN
+        clustering_data = clustering_data[valid_data_mask]
+        metadata = metadata[valid_data_mask]
+
+        # Filter baris yang memiliki nilai `-`
+        invalid_characters_mask = ~(clustering_data.applymap(lambda x: str(x).strip() == '-').any(axis=1))
+        clustering_data = clustering_data[invalid_characters_mask]
+        metadata = metadata[invalid_characters_mask]
+
+        # Pastikan tidak ada data kosong setelah filtering
+        if clustering_data.empty:
+            return jsonify({'error': 'Semua data tidak valid untuk clustering setelah memfilter nilai null atau -.'}), 400
+
+        results = []
+
+        # Loop melalui setiap kombinasi Tahun Ajar dan Semester
+        for tahun_ajar in tahun_ajar_list:
+            for semester in semester_list:
+                subset = df[(df['Tahun Ajar'] == tahun_ajar) & (df['Semester'] == semester)]
+
+                if subset.empty:
+                    continue
+
+                clustering_subset = subset[clustering_columns]
+                # clustering_subset = subset[clustering_columns].copy()
+                for column in clustering_columns:
+                    # clustering_subset[column] = pd.to_numeric(clustering_subset[column], errors='coerce')
+                    clustering_subset.loc[:, column] = pd.to_numeric(clustering_subset[column], errors='coerce')
+
+                clustering_subset = clustering_subset.dropna()
+                subset_array = clustering_subset.values
+
+                # K-Means
+                kmeans = k_means_clustering(subset_array, k=3)  # Asumsikan k=3
+                kmeans_labels = kmeans['labels']
+                kmeans_dbi = davies_bouldin_score(subset_array, kmeans_labels)
+                kmeans_chi = calinski_harabasz_score(subset_array, kmeans_labels)
+                kmeans_silhouette = silhouette_score(subset_array, kmeans_labels)
+
+                # DBSCAN
+                dbscan_results = find_optimal_dbscan_params(subset_array, np.arange(0.5, 2.5, 0.5), range(5, 10))
+                best_dbscan = dbscan_results[0]  # Asumsikan hasil terbaik adalah yang pertama
+                dbscan = DBSCAN(eps=best_dbscan['eps'], min_samples=best_dbscan['min_pts']).fit(subset_array)
+                dbscan_labels = dbscan.labels_
+                dbscan_dbi = davies_bouldin_score(subset_array, dbscan_labels)
+                dbscan_chi = calinski_harabasz_score(subset_array, dbscan_labels)
+                dbscan_silhouette = silhouette_score(subset_array, dbscan_labels)
+
+                # Agglomerative
+                agglomerative = agglomerative_clustering(subset_array, n_clusters=3)  # Asumsikan 3 klaster
+                agglomerative_labels = agglomerative['labels']
+                agglomerative_dbi = davies_bouldin_score(subset_array, agglomerative_labels)
+                agglomerative_chi = calinski_harabasz_score(subset_array, agglomerative_labels)
+                agglomerative_silhouette = silhouette_score(subset_array, agglomerative_labels)
+
+                # Simpan hasil evaluasi
+                results.append({
+                    'tahun_ajar': tahun_ajar,
+                    'semester': semester,
+                    'kmeans': {
+                        'davies_bouldin_index': kmeans_dbi,
+                        'calinski_harabasz_index': kmeans_chi,
+                        'silhouette_score': kmeans_silhouette
+                    },
+                    'dbscan': {
+                        'davies_bouldin_index': dbscan_dbi,
+                        'calinski_harabasz_index': dbscan_chi,
+                        'silhouette_score': dbscan_silhouette
+                    },
+                    'agglomerative': {
+                        'davies_bouldin_index': agglomerative_dbi,
+                        'calinski_harabasz_index': agglomerative_chi,
+                        'silhouette_score': agglomerative_silhouette
+                    }
+                })
+
+        return jsonify({'results': results})
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+
+# @app.route('/hasil-perbandingan', methods=['POST'])
+# def hasil_perbandingan():
+#     try:
+#         # Ambil data dari database
+#         df = get_data_from_db()
+
+#         if df.empty:
+#             return jsonify({'error': 'Tidak ada data untuk tahun ajar dan semester yang dipilih.'}), 400
+
+#         # Variasi Tahun Ajar dan Semester
+#         tahun_ajar_list = ['20212022', '20222023', '20232024']
+#         semester_list = ['Gasal', 'Genap']
+
+#         # Metadata dan clustering columns
+#         metadata_columns = ['Semester', 'Tahun Ajar', 'Kelas', 'NIS', 'Nama Siswa']
+#         clustering_columns = df.columns.difference(metadata_columns)
+
+#         # Pisahkan metadata dan data numerik untuk clustering
+#         metadata = df[metadata_columns]
+#         clustering_data = df[clustering_columns]
+
+#         # Pastikan data numerik valid
+#         for column in clustering_columns:
+#             clustering_data[column] = pd.to_numeric(clustering_data[column], errors='coerce')
+
+#         # Filter baris yang memiliki nilai null atau NaN
+#         clustering_data = clustering_data.dropna()
+#         metadata = metadata.loc[clustering_data.index]
+
+#         # Filter nilai "-"
+#         invalid_mask = clustering_data.applymap(lambda x: str(x).strip() == '-').any(axis=1)
+#         clustering_data = clustering_data[~invalid_mask]
+#         metadata = metadata.loc[~invalid_mask]
+
+#         if clustering_data.empty:
+#             return jsonify({'error': 'Semua data tidak valid untuk clustering setelah memfilter nilai null atau -.'}), 400
+
+#         results = []
+
+#         # Loop melalui setiap kombinasi Tahun Ajar dan Semester
+#         for tahun_ajar in tahun_ajar_list:
+#             for semester in semester_list:
+#                 subset = df[(df['Tahun Ajar'] == tahun_ajar) & (df['Semester'] == semester)]
+#                 if subset.empty:
+#                     continue
+
+#                 clustering_subset = subset[clustering_columns].dropna().copy()
+#                 for column in clustering_columns:
+#                     clustering_subset[column] = pd.to_numeric(clustering_subset[column], errors='coerce')
+#                 subset_array = clustering_subset.values
+
+#                 # K-Means
+#                 kmeans = k_means_clustering(subset_array, k=3)
+#                 if isinstance(kmeans, dict):
+#                     kmeans_labels = kmeans['labels']
+#                 else:
+#                     kmeans_labels = kmeans[0]  # Jika kmeans adalah tuple
+
+#                 kmeans_dbi = davies_bouldin_score(subset_array, kmeans_labels)
+#                 kmeans_chi = calinski_harabasz_score(subset_array, kmeans_labels)
+#                 kmeans_silhouette = silhouette_score(subset_array, kmeans_labels)
+
+#                 # DBSCAN
+#                 dbscan_results = find_optimal_dbscan_params(subset_array, np.arange(0.5, 2.5, 0.5), range(5, 10))
+#                 best_dbscan = dbscan_results[0]
+#                 dbscan = DBSCAN(eps=best_dbscan['eps'], min_samples=best_dbscan['min_pts']).fit(subset_array)
+#                 dbscan_labels = dbscan.labels_
+#                 dbscan_dbi = davies_bouldin_score(subset_array, dbscan_labels)
+#                 dbscan_chi = calinski_harabasz_score(subset_array, dbscan_labels)
+#                 dbscan_silhouette = silhouette_score(subset_array, dbscan_labels)
+
+#                 # Agglomerative
+#                 agglomerative = agglomerative_clustering(subset_array, n_clusters=3)
+#                 if isinstance(agglomerative, dict):
+#                     agglomerative_labels = agglomerative['labels']
+#                 else:
+#                     agglomerative_labels = agglomerative[0]  # Jika agglomerative adalah tuple
+
+#                 agglomerative_dbi = davies_bouldin_score(subset_array, agglomerative_labels)
+#                 agglomerative_chi = calinski_harabasz_score(subset_array, agglomerative_labels)
+#                 agglomerative_silhouette = silhouette_score(subset_array, agglomerative_labels)
+
+#                 # Simpan hasil evaluasi
+#                 results.append({
+#                     'tahun_ajar': tahun_ajar,
+#                     'semester': semester,
+#                     'kmeans': {
+#                         'davies_bouldin_index': kmeans_dbi,
+#                         'calinski_harabasz_index': kmeans_chi,
+#                         'silhouette_score': kmeans_silhouette
+#                     },
+#                     'dbscan': {
+#                         'davies_bouldin_index': dbscan_dbi,
+#                         'calinski_harabasz_index': dbscan_chi,
+#                         'silhouette_score': dbscan_silhouette
+#                     },
+#                     'agglomerative': {
+#                         'davies_bouldin_index': agglomerative_dbi,
+#                         'calinski_harabasz_index': agglomerative_chi,
+#                         'silhouette_score': agglomerative_silhouette
+#                     }
+#                 })
+
+#         return jsonify({'results': results})
+
+#     except Exception as e:
+#         return jsonify({'error': str(e)}), 400
+
+@app.route('/hasil-perbandingan-agglomerative', methods=['POST'])
+def hasil_perbandingan_agglomerative():
+    try:
+        # Ambil data dari database
+        df = get_data_from_db()
+
+        if df.empty:
+            return jsonify({'error': 'Tidak ada data untuk tahun ajar dan semester yang dipilih.'}), 400
+
+        # Variasi Tahun Ajar dan Semester
+        tahun_ajar_list = ['20212022', '20222023', '20232024']
+        semester_list = ['Gasal', 'Genap']
+
+        # Metadata dan clustering columns
+        metadata_columns = ['Semester', 'Tahun Ajar', 'Kelas', 'NIS', 'Nama Siswa']
+        clustering_columns = df.columns.difference(metadata_columns)
+
+        # Filter data valid untuk clustering
+        clustering_data = df[clustering_columns].copy()
+        for column in clustering_columns:
+            clustering_data[column] = pd.to_numeric(clustering_data[column], errors='coerce')
+
+        clustering_data = clustering_data.dropna()  # Hapus baris dengan nilai NaN
+        if clustering_data.empty:
+            return jsonify({'error': 'Semua data tidak valid untuk clustering setelah memfilter nilai null atau -.'}), 400
+
+        results = []
+
+        # Loop melalui setiap kombinasi Tahun Ajar dan Semester
+        for tahun_ajar in tahun_ajar_list:
+            for semester in semester_list:
+                subset = df[(df['Tahun Ajar'] == tahun_ajar) & (df['Semester'] == semester)]
+                if subset.empty:
+                    continue
+
+                clustering_subset = subset[clustering_columns].copy()
+                for column in clustering_columns:
+                    clustering_subset[column] = pd.to_numeric(clustering_subset[column], errors='coerce')
+
+                clustering_subset = clustering_subset.dropna()
+                subset_array = clustering_subset.values
+
+                # Agglomerative
+                agglomerative = agglomerative_clustering(subset_array, n_clusters=3)  # Asumsikan 3 klaster
+                if isinstance(agglomerative, dict):
+                    agglomerative_labels = agglomerative.get('labels', None)
+                elif isinstance(agglomerative, tuple):
+                    agglomerative_labels = agglomerative[0]
+                else:
+                    agglomerative_labels = agglomerative
+
+                # Validasi bahwa agglomerative_labels adalah array
+                if agglomerative_labels is None or not isinstance(agglomerative_labels, (list, np.ndarray)):
+                    return jsonify({'error': 'Output dari agglomerative_clustering tidak valid.'}), 400
+
+                agglomerative_labels = np.array(agglomerative_labels).flatten()  # Pastikan 1D
+
+                # Evaluasi Agglomerative
+                agglomerative_dbi = davies_bouldin_score(subset_array, agglomerative_labels)
+                agglomerative_chi = calinski_harabasz_score(subset_array, agglomerative_labels)
+                agglomerative_silhouette = silhouette_score(subset_array, agglomerative_labels)
+
+                # Simpan hasil evaluasi
+                results.append({
+                    'tahun_ajar': tahun_ajar,
+                    'semester': semester,
+                    'agglomerative': {
+                        'davies_bouldin_index': agglomerative_dbi,
+                        'calinski_harabasz_index': agglomerative_chi,
+                        'silhouette_score': agglomerative_silhouette
+                    }
+                })
+
+        return jsonify({'results': results})
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+
+# @app.route('/hasil-perbandingan-k-means', methods=['POST'])
+# def hasil_perbandingan_k_means():
+    try:
+        # Ambil data dari database
+        df = get_data_from_db()
+
+        if df.empty:
+            return jsonify({'error': 'Tidak ada data untuk tahun ajar dan semester yang dipilih.'}), 400
+
+        # Variasi Tahun Ajar dan Semester
+        tahun_ajar_list = ['20212022', '20222023', '20232024']
+        semester_list = ['Gasal', 'Genap']
+
+        # Metadata dan clustering columns
+        metadata_columns = ['Semester', 'Tahun Ajar', 'Kelas', 'NIS', 'Nama Siswa']
+        clustering_columns = df.columns.difference(metadata_columns)
+
+        # Pisahkan metadata dan data numerik untuk clustering
+        metadata = df[metadata_columns]
+        clustering_data = df[clustering_columns]
+
+        # Pastikan data numerik valid
+        for column in clustering_columns:
+            clustering_data[column] = pd.to_numeric(clustering_data[column], errors='coerce')
+        
+        # Filter baris yang memiliki nilai null atau NaN
+        valid_data_mask = ~clustering_data.isnull().any(axis=1)  # True untuk baris tanpa NaN
+        clustering_data = clustering_data[valid_data_mask]
+        metadata = metadata[valid_data_mask]
+
+        # Filter baris yang memiliki nilai `-`
+        invalid_characters_mask = ~(clustering_data.applymap(lambda x: str(x).strip() == '-').any(axis=1))
+        clustering_data = clustering_data[invalid_characters_mask]
+        metadata = metadata[invalid_characters_mask]
+
+        # Pastikan tidak ada data kosong setelah filtering
+        if clustering_data.empty:
+            return jsonify({'error': 'Semua data tidak valid untuk clustering setelah memfilter nilai null atau -.'}), 400
+
+        results = []
+
+        # Loop melalui setiap kombinasi Tahun Ajar dan Semester
+        for tahun_ajar in tahun_ajar_list:
+            for semester in semester_list:
+                subset = df[(df['Tahun Ajar'] == tahun_ajar) & (df['Semester'] == semester)]
+                if subset.empty:
+                    continue
+
+                clustering_subset = subset[clustering_columns].copy()
+                for column in clustering_columns:
+                    clustering_subset[column] = pd.to_numeric(clustering_subset[column], errors='coerce')
+
+                clustering_subset = clustering_subset.dropna()
+                subset_array = clustering_subset.values
+
+                # K-Means
+                # kmeans = KMeans(n_clusters=3, random_state=42).fit(subset_array)  # 3 klaster
+                # kmeans_labels = kmeans.labels_
+                
+                kmeans = k_means_clustering(subset_array, k=3)  # 3 klaster
+                if isinstance(kmeans, dict):
+                    kmeans_labels = kmeans.get('labels', None)
+                elif isinstance(kmeans, tuple):
+                    kmeans_labels = kmeans[0]
+                else:
+                    kmeans_labels = kmeans
+                    
+                # Validasi bahwa agglomerative_labels adalah array
+                if kmeans_labels is None or not isinstance(kmeans_labels, (list, np.ndarray)):
+                    return jsonify({'error': 'Output dari k-means_clustering tidak valid.'}), 400
+
+                kmeans_labels = np.array(kmeans_labels).flatten()  # Pastikan 1D
+
+                # Pastikan jumlah label dan data sesuai
+                if len(kmeans_labels) != len(subset_array):
+                    return jsonify({'panjang data': len(subset_array), 'panjang label': len(kmeans_labels), 'error': f'Jumlah label ({len(kmeans_labels)}) tidak sesuai dengan jumlah data ({len(subset_array)}).'}), 400
+                    # return jsonify({'error': f'Jumlah label ({len(kmeans_labels)}) tidak sesuai dengan jumlah data ({len(subset_array)}).'}), 400
+
+                # Evaluasi K-Means
+                kmeans_dbi = davies_bouldin_score(subset_array, kmeans_labels)
+                kmeans_chi = calinski_harabasz_score(subset_array, kmeans_labels)
+                kmeans_silhouette = silhouette_score(subset_array, kmeans_labels)
+
+                # Simpan hasil evaluasi
+                results.append({
+                    'tahun_ajar': tahun_ajar,
+                    'semester': semester,
+                    'kmeans': {
+                        'davies_bouldin_index': kmeans_dbi,
+                        'calinski_harabasz_index': kmeans_chi,
+                        'silhouette_score': kmeans_silhouette
+                    }
+                })
+
+        return jsonify({'results': results})
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+
+@app.route('/hasil-perbandingan-k-means', methods=['POST'])
+def hasil_perbandingan_k_means():
+    try:
+        # Ambil data dari database
+        df = get_data_from_db()
+
+        if df.empty:
+            return jsonify({'error': 'Tidak ada data untuk tahun ajar dan semester yang dipilih.'}), 400
+
+        # Metadata dan clustering columns
+        metadata_columns = ['Semester', 'Tahun Ajar', 'Kelas', 'NIS', 'Nama Siswa']
+        clustering_columns = df.columns.difference(metadata_columns)
+
+        # Pisahkan metadata dan data numerik untuk clustering
+        metadata = df[metadata_columns]
+        clustering_data = df[clustering_columns]
+
+        # Pastikan data numerik valid
+        for column in clustering_columns:
+            clustering_data[column] = pd.to_numeric(clustering_data[column], errors='coerce')
+
+        # Filter baris yang memiliki nilai null atau NaN
+        valid_data_mask = ~clustering_data.isnull().any(axis=1)
+        clustering_data = clustering_data[valid_data_mask]
+        metadata = metadata[valid_data_mask]
+
+        # Filter baris yang memiliki nilai `-`
+        invalid_characters_mask = ~(clustering_data.applymap(lambda x: str(x).strip() == '-').any(axis=1))
+        clustering_data = clustering_data[invalid_characters_mask]
+        metadata = metadata[invalid_characters_mask]
+
+        # Pastikan tidak ada data kosong setelah filtering
+        if clustering_data.empty:
+            return jsonify({'error': 'Semua data tidak valid untuk clustering setelah memfilter nilai null atau -.'}), 400
+
+        results = []
+
+        # Loop melalui setiap kombinasi Tahun Ajar dan Semester
+        for tahun_ajar in df['Tahun Ajar'].unique():
+            for semester in df['Semester'].unique():
+                subset = df[(df['Tahun Ajar'] == tahun_ajar) & (df['Semester'] == semester)]
+                if subset.empty:
+                    continue
+
+                clustering_subset = subset[clustering_columns].copy()
+                for column in clustering_columns:
+                    clustering_subset[column] = pd.to_numeric(clustering_subset[column], errors='coerce')
+
+                clustering_subset = clustering_subset.dropna()
+                subset_array = clustering_subset.values
+
+                # Periksa apakah data valid untuk clustering
+                if subset_array.shape[0] == 0:
+                    continue
+
+                # K-Means
+                kmeans = k_means_clustering(subset_array, k=3)
+                if isinstance(kmeans, tuple):
+                    _, kmeans_labels = kmeans
+                else:
+                    return jsonify({'error': 'Output K-Means tidak valid.'}), 400
+
+                kmeans_labels = np.array(kmeans_labels).flatten()
+
+                # Pastikan jumlah label sesuai
+                if len(kmeans_labels) != subset_array.shape[0]:
+                    return jsonify({
+                        'panjang data': subset_array.shape[0],
+                        'panjang label': len(kmeans_labels),
+                        'error': f'Jumlah label ({len(kmeans_labels)}) tidak sesuai dengan jumlah data ({subset_array.shape[0]}).'
+                    }), 400
+
+                # Evaluasi K-Means
+                kmeans_dbi = davies_bouldin_score(subset_array, kmeans_labels)
+                kmeans_chi = calinski_harabasz_score(subset_array, kmeans_labels)
+                kmeans_silhouette = silhouette_score(subset_array, kmeans_labels)
+
+                # Simpan hasil evaluasi
+                results.append({
+                    'tahun_ajar': tahun_ajar,
+                    'semester': semester,
+                    'kmeans': {
+                        'davies_bouldin_index': kmeans_dbi,
+                        'calinski_harabasz_index': kmeans_chi,
+                        'silhouette_score': kmeans_silhouette
+                    }
+                })
+
+        return jsonify({'results': results})
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
+
+@app.route('/hasil-perbandingan-dbscan', methods=['POST'])
+def hasil_perbandingan_dbscan():
+    try:
+        # Ambil data dari database
+        df = get_data_from_db()
+
+        if df.empty:
+            return jsonify({'error': 'Tidak ada data untuk tahun ajar dan semester yang dipilih.'}), 400
+
+        # Metadata dan clustering columns
+        metadata_columns = ['Semester', 'Tahun Ajar', 'Kelas', 'NIS', 'Nama Siswa']
+        clustering_columns = df.columns.difference(metadata_columns)
+
+        # Pisahkan metadata dan data numerik untuk clustering
+        metadata = df[metadata_columns]
+        clustering_data = df[clustering_columns]
+
+        # Pastikan data numerik valid
+        for column in clustering_columns:
+            clustering_data[column] = pd.to_numeric(clustering_data[column], errors='coerce')
+
+        # Filter baris yang memiliki nilai null atau NaN
+        valid_data_mask = ~clustering_data.isnull().any(axis=1)
+        clustering_data = clustering_data[valid_data_mask]
+        metadata = metadata[valid_data_mask]
+
+        # Filter baris yang memiliki nilai `-`
+        invalid_characters_mask = ~(clustering_data.applymap(lambda x: str(x).strip() == '-').any(axis=1))
+        clustering_data = clustering_data[invalid_characters_mask]
+        metadata = metadata[invalid_characters_mask]
+
+        # Pastikan tidak ada data kosong setelah filtering
+        if clustering_data.empty:
+            return jsonify({'error': 'Semua data tidak valid untuk clustering setelah memfilter nilai null atau -.'}), 400
+
+        results = []
+
+        # Loop melalui setiap kombinasi Tahun Ajar dan Semester
+        for tahun_ajar in df['Tahun Ajar'].unique():
+            for semester in df['Semester'].unique():
+                subset = df[(df['Tahun Ajar'] == tahun_ajar) & (df['Semester'] == semester)]
+                if subset.empty:
+                    continue
+
+                clustering_subset = subset[clustering_columns].copy()
+                for column in clustering_columns:
+                    clustering_subset[column] = pd.to_numeric(clustering_subset[column], errors='coerce')
+
+                clustering_subset = clustering_subset.dropna()
+                subset_array = clustering_subset.values
+
+                # Periksa apakah data valid untuk clustering
+                if subset_array.shape[0] == 0:
+                    continue
+
+                # Cari parameter terbaik untuk DBSCAN
+                eps_range = np.linspace(0.1, 1.0, 10)  # Variasi eps
+                min_pts_range = range(3, 10)           # Variasi min_pts
+
+                optimal_params = find_optimal_dbscan_params(subset_array, eps_range, min_pts_range)
+
+                if len(optimal_params) == 0:
+                    continue
+
+                best_param = optimal_params[0]  # Ambil parameter terbaik
+                dbscan_model = DBSCAN(eps=best_param['eps'], min_pts=best_param['min_pts'])
+                labels = dbscan_model.fit(subset_array)
+
+                # Evaluasi hasil clustering
+                evaluation = evaluate_clustering_dbscan(subset_array, labels)
+
+                # Simpan hasil evaluasi
+                results.append({
+                    'tahun_ajar': tahun_ajar,
+                    'semester': semester,
+                    'optimal_params': {
+                        'eps': best_param['eps'],
+                        'min_pts': best_param['min_pts']
+                    },
+                    'evaluation': evaluation
+                })
+
+        return jsonify({'results': results})
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
 
 
 if __name__ == '__main__':

@@ -85,7 +85,7 @@ def evaluate_clustering_kmeans(data, clusters, centroids):
 
 
 
-""" Fungsi Elbow Method Sklean """
+""" Fungsi Elbow Method Sklearn """
 def find_optimal_k_sklearn(data, max_k=10):
     distortions = []
     for k in range(1, max_k + 1):
