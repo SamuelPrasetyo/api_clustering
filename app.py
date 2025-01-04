@@ -967,8 +967,8 @@ def hasil_perbandingan_dbscan():
                     continue
 
                 # Cari parameter terbaik untuk DBSCAN
-                eps_range = np.linspace(0.1, 1.0, 10)  # Variasi eps
-                min_pts_range = range(3, 10)           # Variasi min_pts
+                eps_range = np.arange(7, 10, 0.5) # Variasi eps
+                min_pts_range = range(12, 22, 1) # Variasi min_pts
 
                 optimal_params = find_optimal_dbscan_params(subset_array, eps_range, min_pts_range)
 
