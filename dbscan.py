@@ -52,12 +52,10 @@ def find_optimal_dbscan_params(data, eps_range, min_pts_range):
                     silhouette = silhouette_score(data, labels) if -1 in labels else 0
                     dbi = davies_bouldin_score(data, labels)
                     chi = calinski_harabasz_score(data, labels)
-                    # sse = calculate_sse(data, labels)
                 else:
                     silhouette = -1
                     dbi = -1
                     chi = -1
-                    # sse = -1
 
                 # Simpan hasil evaluasi
                 results.append({
@@ -65,8 +63,7 @@ def find_optimal_dbscan_params(data, eps_range, min_pts_range):
                     'min_pts': min_pts,
                     'silhouette_score': silhouette,
                     'davies_bouldin_index': dbi,
-                    'calinski_harabasz_index': chi,
-                    # 'sum_squared_error': sse
+                    'calinski_harabasz_index': chi
                 })
 
             except Exception as e:
@@ -78,17 +75,6 @@ def find_optimal_dbscan_params(data, eps_range, min_pts_range):
     results = sorted(results, key=lambda x: (-x['silhouette_score'], x['davies_bouldin_index']))
 
     return results
-
-def calculate_sse(data, labels):
-    unique_labels = set(labels)
-    sse = 0
-    for label in unique_labels:
-        if label == -1:  # Abaikan noise (label -1)
-            continue
-        cluster_points = data[labels == label]
-        centroid = cluster_points.mean(axis=0)
-        sse += np.sum((cluster_points - centroid) ** 2)
-    return sse
 
 def calculate_centroids(data, labels):
     """
