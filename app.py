@@ -228,7 +228,7 @@ def find_params():
     try:
         # Ambil data request
         data = request.get_json()
-        eps_range = np.arange(data.get('eps_min', 7), data.get('eps_max', 10), data.get('eps_step', 0.5))
+        eps_range = np.arange(data.get('eps_min', 4), data.get('eps_max', 12), data.get('eps_step', 0.5))
         min_pts_range = range(data.get('min_pts_min', 12), data.get('min_pts_max', 22), data.get('min_pts_step', 1))
 
         # Ambil data dari database
@@ -783,7 +783,7 @@ def hasil_perbandingan_dbscan():
                     continue
 
                 # Cari parameter terbaik untuk DBSCAN
-                eps_range = np.arange(7, 10, 0.5) # Variasi eps
+                eps_range = np.arange(4, 12, 0.5) # Variasi eps
                 min_pts_range = range(12, 22, 1) # Variasi min_pts
 
                 optimal_params = find_optimal_dbscan_params(subset_array, eps_range, min_pts_range)
