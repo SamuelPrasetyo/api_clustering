@@ -197,7 +197,7 @@ def kmeans():
         # Gabungkan metadata dengan hasil clustering
         result_df = pd.concat([metadata, clustering_data], axis=1)
         
-        # Sorting berdasarkan Nama Siswa
+        # Sorting berdasarkan Cluster dan Kelas
         result_df = result_df.sort_values(by=['Cluster', 'Kelas'])
 
         # Tambahkan nama mata pelajaran
