@@ -47,6 +47,50 @@ def find_optimal_dbscan_params(data, eps_range, min_pts_range):
                 dbscan = DBSCAN(eps=eps, min_pts=min_pts)
                 labels = dbscan.fit(data)
 
+                # Hitung jumlah cluster (label unik, kecuali label -1 untuk outlier)
+                unique_labels = set(labels)
+                num_clusters = len(unique_labels) - (1 if -1 in unique_labels else 0)
+
+                # Evaluasi hasil clustering
+                if num_clusters > 1:  # Hanya hitung metrik jika ada lebih dari 1 cluster
+                    silhouette = silhouette_score(data, labels) if num_clusters > 1 else -1
+                    dbi = davies_bouldin_score(data, labels)
+                    chi = calinski_harabasz_score(data, labels)
+                else:
+                    silhouette = -1
+                    dbi = -1
+                    chi = -1
+
+                # Simpan hasil evaluasi
+                results.append({
+                    'eps': eps,
+                    'min_pts': min_pts,
+                    'num_clusters': num_clusters,
+                    'silhouette_score': silhouette,
+                    'davies_bouldin_index': dbi,
+                    'calinski_harabasz_index': chi
+                })
+
+            except Exception as e:
+                # Tangani error jika ada (data tidak valid untuk parameter tertentu)
+                print(f"Error with eps={eps}, min_pts={min_pts}: {e}")
+                continue
+
+    # Urutkan hasil berdasarkan kriteria evaluasi (Silhouette Score yang tertinggi)
+    results = sorted(results, key=lambda x: (-x['silhouette_score'], x['davies_bouldin_index']))
+
+    return results
+
+# def find_optimal_dbscan_params(data, eps_range, min_pts_range):
+    results = []
+
+    for eps in eps_range:
+        for min_pts in min_pts_range:
+            try:
+                # Inisialisasi DBSCAN dengan parameter saat ini
+                dbscan = DBSCAN(eps=eps, min_pts=min_pts)
+                labels = dbscan.fit(data)
+
                 # Evaluasi hasil clustering hanya jika terdapat lebih dari 1 klaster
                 if len(set(labels)) > 1:  # Jika terdapat lebih dari 1 klaster (selain outlier)
                     silhouette = silhouette_score(data, labels) if -1 in labels else 0
@@ -71,7 +115,7 @@ def find_optimal_dbscan_params(data, eps_range, min_pts_range):
                 print(f"Error with eps={eps}, min_pts={min_pts}: {e}")
                 continue
 
-    # Urutkan hasil berdasarkan kriteria evaluasi (misalnya Silhouette Score yang tertinggi)
+    # Urutkan hasil berdasarkan kriteria evaluasi (Silhouette Score yang tertinggi)
     results = sorted(results, key=lambda x: (-x['silhouette_score'], x['davies_bouldin_index']))
 
     return results
