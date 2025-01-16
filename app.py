@@ -16,6 +16,12 @@ import numpy as np
 from flask_cors import CORS
 from flask_sqlalchemy import SQLAlchemy
 
+# Cuman dipake sekali
+from sqlalchemy import create_engine, Table, Column, Integer, String, Float, MetaData
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
+# End
+
 app = Flask(__name__)
 CORS(app)
 
@@ -24,6 +30,26 @@ app.config['SQLALCHEMY_DATABASE_URI'] = 'mysql+mysqlconnector://root:@localhost/
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
+
+# Cuman Dipake Sekali
+Base = declarative_base()
+engine = create_engine(app.config['SQLALCHEMY_DATABASE_URI'])
+Session = sessionmaker(bind=engine)
+session = Session()
+
+class Nilaievaluasi(Base):
+    __tablename__ = 'nilaievaluasi'
+
+    idevaluasi = Column(Integer, primary_key=True, autoincrement=True)
+    semester = Column(String(10))
+    tahunajar = Column(String(20))
+    algoritma = Column(String(20))
+    chi = Column(Float)
+    dbi = Column(Float)
+    ss = Column(Float)
+
+Base.metadata.create_all(engine)
+# End
 
 # Model Database
 class NilaiSiswa(db.Model):
@@ -449,13 +475,15 @@ def agglomerative():
 
     except Exception as e:
         return jsonify({'error': str(e)}), 500    
-    
-# @app.route('/hasil-perbandingan', methods=['POST'])
-# def hasil_perbandingan():
+
+
+
+@app.route('/hasil-perbandingan-agglomerative', methods=['POST'])
+def hasil_perbandingan_agglomerative():
     try:
         # Ambil data dari database
         df = get_data_from_db()
-        
+
         if df.empty:
             return jsonify({'error': 'Tidak ada data untuk tahun ajar dan semester yang dipilih.'}), 400
 
@@ -467,25 +495,12 @@ def agglomerative():
         metadata_columns = ['Semester', 'Tahun Ajar', 'Kelas', 'NIS', 'Nama Siswa']
         clustering_columns = df.columns.difference(metadata_columns)
 
-        # Pisahkan metadata dan data numerik untuk clustering
-        metadata = df[metadata_columns]
-        clustering_data = df[clustering_columns]
-        
-        # Pastikan data numerik valid
+        # Filter data valid untuk clustering
+        clustering_data = df[clustering_columns].copy()
         for column in clustering_columns:
             clustering_data[column] = pd.to_numeric(clustering_data[column], errors='coerce')
 
-        # Filter baris yang memiliki nilai null atau NaN
-        valid_data_mask = ~clustering_data.isnull().any(axis=1)  # True untuk baris tanpa NaN
-        clustering_data = clustering_data[valid_data_mask]
-        metadata = metadata[valid_data_mask]
-
-        # Filter baris yang memiliki nilai `-`
-        invalid_characters_mask = ~(clustering_data.applymap(lambda x: str(x).strip() == '-').any(axis=1))
-        clustering_data = clustering_data[invalid_characters_mask]
-        metadata = metadata[invalid_characters_mask]
-
-        # Pastikan tidak ada data kosong setelah filtering
+        clustering_data = clustering_data.dropna()  # Hapus baris dengan nilai NaN
         if clustering_data.empty:
             return jsonify({'error': 'Semua data tidak valid untuk clustering setelah memfilter nilai null atau -.'}), 400
 
@@ -495,56 +510,51 @@ def agglomerative():
         for tahun_ajar in tahun_ajar_list:
             for semester in semester_list:
                 subset = df[(df['Tahun Ajar'] == tahun_ajar) & (df['Semester'] == semester)]
-
                 if subset.empty:
                     continue
 
-                clustering_subset = subset[clustering_columns]
-                # clustering_subset = subset[clustering_columns].copy()
+                clustering_subset = subset[clustering_columns].copy()
                 for column in clustering_columns:
-                    # clustering_subset[column] = pd.to_numeric(clustering_subset[column], errors='coerce')
-                    clustering_subset.loc[:, column] = pd.to_numeric(clustering_subset[column], errors='coerce')
+                    clustering_subset[column] = pd.to_numeric(clustering_subset[column], errors='coerce')
 
                 clustering_subset = clustering_subset.dropna()
                 subset_array = clustering_subset.values
 
-                # K-Means
-                kmeans = k_means_clustering(subset_array, k=3)  # Asumsikan k=3
-                kmeans_labels = kmeans['labels']
-                kmeans_dbi = davies_bouldin_score(subset_array, kmeans_labels)
-                kmeans_chi = calinski_harabasz_score(subset_array, kmeans_labels)
-                kmeans_silhouette = silhouette_score(subset_array, kmeans_labels)
-
-                # DBSCAN
-                dbscan_results = find_optimal_dbscan_params(subset_array, np.arange(0.5, 2.5, 0.5), range(5, 10))
-                best_dbscan = dbscan_results[0]  # Asumsikan hasil terbaik adalah yang pertama
-                dbscan = DBSCAN(eps=best_dbscan['eps'], min_samples=best_dbscan['min_pts']).fit(subset_array)
-                dbscan_labels = dbscan.labels_
-                dbscan_dbi = davies_bouldin_score(subset_array, dbscan_labels)
-                dbscan_chi = calinski_harabasz_score(subset_array, dbscan_labels)
-                dbscan_silhouette = silhouette_score(subset_array, dbscan_labels)
-
                 # Agglomerative
                 agglomerative = agglomerative_clustering(subset_array, n_clusters=3)  # Asumsikan 3 klaster
-                agglomerative_labels = agglomerative['labels']
+                if isinstance(agglomerative, dict):
+                    agglomerative_labels = agglomerative.get('labels', None)
+                elif isinstance(agglomerative, tuple):
+                    agglomerative_labels = agglomerative[0]
+                else:
+                    agglomerative_labels = agglomerative
+
+                # Validasi bahwa agglomerative_labels adalah array
+                if agglomerative_labels is None or not isinstance(agglomerative_labels, (list, np.ndarray)):
+                    return jsonify({'error': 'Output dari agglomerative_clustering tidak valid.'}), 400
+
+                agglomerative_labels = np.array(agglomerative_labels).flatten()  # Pastikan 1D
+
+                # Evaluasi Agglomerative
                 agglomerative_dbi = davies_bouldin_score(subset_array, agglomerative_labels)
                 agglomerative_chi = calinski_harabasz_score(subset_array, agglomerative_labels)
                 agglomerative_silhouette = silhouette_score(subset_array, agglomerative_labels)
 
-                # Simpan hasil evaluasi
+                # Simpan hasil evaluasi ke database
+                evaluasi = Nilaievaluasi(
+                    semester=semester,
+                    tahunajar=tahun_ajar,
+                    algoritma='Agglomerative',
+                    chi=agglomerative_chi,
+                    dbi=agglomerative_dbi,
+                    ss=agglomerative_silhouette
+                )
+                session.add(evaluasi)
+
+                # Simpan hasil evaluasi ke response JSON
                 results.append({
                     'tahun_ajar': tahun_ajar,
                     'semester': semester,
-                    'kmeans': {
-                        'davies_bouldin_index': kmeans_dbi,
-                        'calinski_harabasz_index': kmeans_chi,
-                        'silhouette_score': kmeans_silhouette
-                    },
-                    'dbscan': {
-                        'davies_bouldin_index': dbscan_dbi,
-                        'calinski_harabasz_index': dbscan_chi,
-                        'silhouette_score': dbscan_silhouette
-                    },
                     'agglomerative': {
                         'davies_bouldin_index': agglomerative_dbi,
                         'calinski_harabasz_index': agglomerative_chi,
@@ -552,13 +562,16 @@ def agglomerative():
                     }
                 })
 
+        session.commit()
+
         return jsonify({'results': results})
 
     except Exception as e:
+        session.rollback()
         return jsonify({'error': str(e)}), 400
 
-@app.route('/hasil-perbandingan-agglomerative', methods=['POST'])
-def hasil_perbandingan_agglomerative():
+# @app.route('/hasil-perbandingan-agglomerative', methods=['POST'])
+# def hasil_perbandingan_agglomerative():
     try:
         # Ambil data dari database
         df = get_data_from_db()
@@ -637,6 +650,113 @@ def hasil_perbandingan_agglomerative():
 
 @app.route('/hasil-perbandingan-k-means', methods=['POST'])
 def hasil_perbandingan_k_means():
+    try:
+        # Ambil data dari database
+        df = get_data_from_db()
+
+        if df.empty:
+            return jsonify({'error': 'Tidak ada data untuk tahun ajar dan semester yang dipilih.'}), 400
+
+        # Metadata dan clustering columns
+        metadata_columns = ['Semester', 'Tahun Ajar', 'Kelas', 'NIS', 'Nama Siswa']
+        clustering_columns = df.columns.difference(metadata_columns)
+
+        # Pisahkan metadata dan data numerik untuk clustering
+        metadata = df[metadata_columns]
+        clustering_data = df[clustering_columns]
+
+        # Pastikan data numerik valid
+        for column in clustering_columns:
+            clustering_data[column] = pd.to_numeric(clustering_data[column], errors='coerce')
+
+        # Filter baris yang memiliki nilai null atau NaN
+        valid_data_mask = ~clustering_data.isnull().any(axis=1)
+        clustering_data = clustering_data[valid_data_mask]
+        metadata = metadata[valid_data_mask]
+
+        # Filter baris yang memiliki nilai `-`
+        invalid_characters_mask = ~(clustering_data.applymap(lambda x: str(x).strip() == '-').any(axis=1))
+        clustering_data = clustering_data[invalid_characters_mask]
+        metadata = metadata[invalid_characters_mask]
+
+        # Pastikan tidak ada data kosong setelah filtering
+        if clustering_data.empty:
+            return jsonify({'error': 'Semua data tidak valid untuk clustering setelah memfilter nilai null atau -.'}), 400
+
+        results = []
+
+        # Loop melalui setiap kombinasi Tahun Ajar dan Semester
+        for tahun_ajar in df['Tahun Ajar'].unique():
+            for semester in df['Semester'].unique():
+                subset = df[(df['Tahun Ajar'] == tahun_ajar) & (df['Semester'] == semester)]
+                if subset.empty:
+                    continue
+
+                clustering_subset = subset[clustering_columns].copy()
+                for column in clustering_columns:
+                    clustering_subset[column] = pd.to_numeric(clustering_subset[column], errors='coerce')
+
+                clustering_subset = clustering_subset.dropna()
+                subset_array = clustering_subset.values
+
+                # Periksa apakah data valid untuk clustering
+                if subset_array.shape[0] == 0:
+                    continue
+
+                # K-Means
+                kmeans = k_means_clustering(subset_array, k=3)
+                if isinstance(kmeans, tuple):
+                    _, kmeans_labels = kmeans
+                else:
+                    return jsonify({'error': 'Output K-Means tidak valid.'}), 400
+
+                kmeans_labels = np.array(kmeans_labels).flatten()
+
+                # Pastikan jumlah label sesuai
+                if len(kmeans_labels) != subset_array.shape[0]:
+                    return jsonify({
+                        'panjang data': subset_array.shape[0],
+                        'panjang label': len(kmeans_labels),
+                        'error': f'Jumlah label ({len(kmeans_labels)}) tidak sesuai dengan jumlah data ({subset_array.shape[0]}).'
+                    }), 400
+
+                # Evaluasi K-Means
+                kmeans_dbi = davies_bouldin_score(subset_array, kmeans_labels)
+                kmeans_chi = calinski_harabasz_score(subset_array, kmeans_labels)
+                kmeans_silhouette = silhouette_score(subset_array, kmeans_labels)
+
+                # Simpan hasil evaluasi ke database
+                evaluasi = Nilaievaluasi(
+                    semester=semester,
+                    tahunajar=tahun_ajar,
+                    algoritma='K-Means',
+                    chi=kmeans_chi,
+                    dbi=kmeans_dbi,
+                    ss=kmeans_silhouette
+                )
+                session.add(evaluasi)
+
+                # Simpan hasil evaluasi ke response JSON
+                results.append({
+                    'tahun_ajar': tahun_ajar,
+                    'semester': semester,
+                    'kmeans': {
+                        'davies_bouldin_index': kmeans_dbi,
+                        'calinski_harabasz_index': kmeans_chi,
+                        'silhouette_score': kmeans_silhouette
+                    }
+                })
+
+        session.commit()
+
+        return jsonify({'results': results})
+
+    except Exception as e:
+        session.rollback()
+        return jsonify({'error': str(e)}), 400
+
+# @app.route('/hasil-perbandingan-k-means', methods=['POST'])
+# def hasil_perbandingan_k_means():
     try:
         # Ambil data dari database
         df = get_data_from_db()
@@ -799,6 +919,106 @@ def hasil_perbandingan_dbscan():
                 # Evaluasi hasil clustering
                 evaluation = evaluate_clustering_dbscan(subset_array, labels)
 
+                # Simpan hasil evaluasi ke database
+                evaluasi = Nilaievaluasi(
+                    semester=semester,
+                    tahunajar=tahun_ajar,
+                    algoritma='DBSCAN',
+                    chi=evaluation.get('calinski_harabasz_index', None),
+                    dbi=evaluation.get('davies_bouldin_index', None),
+                    ss=evaluation.get('silhouette_score', None)
+                )
+                session.add(evaluasi)
+
+                # Simpan hasil evaluasi ke response JSON
+                results.append({
+                    'tahun_ajar': tahun_ajar,
+                    'semester': semester,
+                    'optimal_params': {
+                        'eps': best_param['eps'],
+                        'min_pts': best_param['min_pts']
+                    },
+                    'evaluation': evaluation
+                })
+
+        session.commit()
+
+        return jsonify({'results': results})
+
+    except Exception as e:
+        session.rollback()
+        return jsonify({'error': str(e)}), 400
+# @app.route('/hasil-perbandingan-dbscan', methods=['POST'])
+# def hasil_perbandingan_dbscan():
+    try:
+        # Ambil data dari database
+        df = get_data_from_db()
+
+        if df.empty:
+            return jsonify({'error': 'Tidak ada data untuk tahun ajar dan semester yang dipilih.'}), 400
+
+        # Metadata dan clustering columns
+        metadata_columns = ['Semester', 'Tahun Ajar', 'Kelas', 'NIS', 'Nama Siswa']
+        clustering_columns = df.columns.difference(metadata_columns)
+
+        # Pisahkan metadata dan data numerik untuk clustering
+        metadata = df[metadata_columns]
+        clustering_data = df[clustering_columns]
+
+        # Pastikan data numerik valid
+        for column in clustering_columns:
+            clustering_data[column] = pd.to_numeric(clustering_data[column], errors='coerce')
+
+        # Filter baris yang memiliki nilai null atau NaN
+        valid_data_mask = ~clustering_data.isnull().any(axis=1)
+        clustering_data = clustering_data[valid_data_mask]
+        metadata = metadata[valid_data_mask]
+
+        # Filter baris yang memiliki nilai `-`
+        invalid_characters_mask = ~(clustering_data.applymap(lambda x: str(x).strip() == '-').any(axis=1))
+        clustering_data = clustering_data[invalid_characters_mask]
+        metadata = metadata[invalid_characters_mask]
+
+        # Pastikan tidak ada data kosong setelah filtering
+        if clustering_data.empty:
+            return jsonify({'error': 'Semua data tidak valid untuk clustering setelah memfilter nilai null atau -.'}), 400
+
+        results = []
+
+        # Loop melalui setiap kombinasi Tahun Ajar dan Semester
+        for tahun_ajar in df['Tahun Ajar'].unique():
+            for semester in df['Semester'].unique():
+                subset = df[(df['Tahun Ajar'] == tahun_ajar) & (df['Semester'] == semester)]
+                if subset.empty:
+                    continue
+
+                clustering_subset = subset[clustering_columns].copy()
+                for column in clustering_columns:
+                    clustering_subset[column] = pd.to_numeric(clustering_subset[column], errors='coerce')
+
+                clustering_subset = clustering_subset.dropna()
+                subset_array = clustering_subset.values
+
+                # Periksa apakah data valid untuk clustering
+                if subset_array.shape[0] == 0:
+                    continue
+
+                # Cari parameter terbaik untuk DBSCAN
+                eps_range = np.arange(6, 15, 0.5) # Variasi eps
+                min_pts_range = range(12, 22, 1) # Variasi min_pts
+
+                optimal_params = find_optimal_dbscan_params(subset_array, eps_range, min_pts_range)
+
+                if len(optimal_params) == 0:
+                    continue
+
+                best_param = optimal_params[0]  # Ambil parameter terbaik
+                dbscan_model = DBSCAN(eps=best_param['eps'], min_pts=best_param['min_pts'])
+                labels = dbscan_model.fit(subset_array)
+
+                # Evaluasi hasil clustering
+                evaluation = evaluate_clustering_dbscan(subset_array, labels)
+
                 # Simpan hasil evaluasi
                 results.append({
                     'tahun_ajar': tahun_ajar,
@@ -811,131 +1031,6 @@ def hasil_perbandingan_dbscan():
                 })
 
         return jsonify({'results': results})
-
-    except Exception as e:
-        return jsonify({'error': str(e)}), 400
-
-@app.route('/perbandingan-total-poin', methods=['POST'])
-def perbandingan_total_poin():
-    try:
-        # Daftar tahun ajar dan semester yang akan diproses
-        tahun_ajar_list = ['20212022', '20222023', '20232024']
-        semester_list = ['Gasal', 'Genap']
-
-        # Fungsi untuk mengambil hasil evaluasi dari setiap algoritma
-        def get_results_from_algorithm(algorithm_route):
-            response = app.test_client().post(algorithm_route, json={})
-            if response.status_code == 200:
-                return response.json.get('results', [])
-            else:
-                return []
-
-        # Ambil hasil evaluasi dari setiap algoritma
-        kmeans_results = get_results_from_algorithm('/hasil-perbandingan-k-means')
-        dbscan_results = get_results_from_algorithm('/hasil-perbandingan-dbscan')
-        agglomerative_results = get_results_from_algorithm('/hasil-perbandingan-agglomerative')
-
-        # Total poin untuk setiap algoritma di seluruh kombinasi
-        total_points = {'kmeans': 0, 'dbscan': 0, 'agglomerative': 0}
-
-        # Loop melalui semua kombinasi tahun ajar dan semester
-        for tahun_ajar in tahun_ajar_list:
-            for semester in semester_list:
-                # Filter hasil untuk kombinasi tahun ajar dan semester tertentu
-                def filter_results_by_tahun_ajar_semester(results, tahun_ajar, semester):
-                    return next((result for result in results if result['tahun_ajar'] == tahun_ajar and result['semester'] == semester), None)
-
-                kmeans_result = filter_results_by_tahun_ajar_semester(kmeans_results, tahun_ajar, semester)
-                dbscan_result = filter_results_by_tahun_ajar_semester(dbscan_results, tahun_ajar, semester)
-                agglomerative_result = filter_results_by_tahun_ajar_semester(agglomerative_results, tahun_ajar, semester)
-
-                if not kmeans_result or not dbscan_result or not agglomerative_result:
-                    continue  # Jika salah satu hasil tidak ditemukan, lewati kombinasi ini
-
-                # Perbandingan skor evaluasi untuk kombinasi ini
-                metrics = ['davies_bouldin_index', 'calinski_harabasz_index', 'silhouette_score']
-                algorithms = ['kmeans', 'dbscan', 'agglomerative']
-
-                # Bandingkan setiap metrik untuk kombinasi saat ini
-                for metric in metrics:
-                    scores = {
-                        'kmeans': kmeans_result['kmeans'][metric],
-                        'dbscan': dbscan_result['evaluation'][metric],
-                        'agglomerative': agglomerative_result['agglomerative'][metric],
-                    }
-
-                    # Cari algoritma dengan skor terbaik
-                    if metric == 'davies_bouldin_index':  # DBI, lebih kecil lebih baik
-                        best_algorithm = min(scores, key=scores.get)
-                    else:  # Silhouette Score dan CHI, lebih besar lebih baik
-                        best_algorithm = max(scores, key=scores.get)
-
-                    # Beri poin ke algoritma terbaik
-                    total_points[best_algorithm] += 1
-
-        return jsonify({'total_points': total_points})
-
-    except Exception as e:
-        return jsonify({'error': str(e)}), 400
-
-@app.route('/perbandingan-total-poin2', methods=['POST'])
-def perbandingan_total_poin2():
-    try:
-        # Daftar tahun ajar dan semester yang akan diproses
-        tahun_ajar_list = ['20212022', '20222023', '20232024']
-        semester_list = ['Gasal', 'Genap']
-
-        # Fungsi untuk mengambil hasil evaluasi dari setiap algoritma
-        def get_results_from_algorithm(algorithm_route):
-            response = app.test_client().post(algorithm_route, json={})
-            if response.status_code == 200:
-                return response.json.get('results', [])
-            else:
-                return []
-
-        # Ambil hasil evaluasi dari setiap algoritma
-        kmeans_results = get_results_from_algorithm('/hasil-perbandingan-k-means')
-        dbscan_results = get_results_from_algorithm('/hasil-perbandingan-dbscan')
-        agglomerative_results = get_results_from_algorithm('/hasil-perbandingan-agglomerative')
-
-        # Total skor untuk setiap algoritma
-        total_scores = {
-            'kmeans': {'davies_bouldin_index': 0, 'calinski_harabasz_index': 0, 'silhouette_score': 0},
-            'dbscan': {'davies_bouldin_index': 0, 'calinski_harabasz_index': 0, 'silhouette_score': 0},
-            'agglomerative': {'davies_bouldin_index': 0, 'calinski_harabasz_index': 0, 'silhouette_score': 0}
-        }
-
-        # Loop melalui semua kombinasi tahun ajar dan semester
-        for tahun_ajar in tahun_ajar_list:
-            for semester in semester_list:
-                # Filter hasil untuk kombinasi tahun ajar dan semester tertentu
-                def filter_results_by_tahun_ajar_semester(results, tahun_ajar, semester):
-                    return next((result for result in results if result['tahun_ajar'] == tahun_ajar and result['semester'] == semester), None)
-
-                kmeans_result = filter_results_by_tahun_ajar_semester(kmeans_results, tahun_ajar, semester)
-                dbscan_result = filter_results_by_tahun_ajar_semester(dbscan_results, tahun_ajar, semester)
-                agglomerative_result = filter_results_by_tahun_ajar_semester(agglomerative_results, tahun_ajar, semester)
-
-                if not kmeans_result or not dbscan_result or not agglomerative_result:
-                    continue  # Jika salah satu hasil tidak ditemukan, lewati kombinasi ini
-
-                # Tambahkan skor evaluasi ke total
-                total_scores['kmeans']['davies_bouldin_index'] += kmeans_result['kmeans']['davies_bouldin_index']
-                total_scores['kmeans']['calinski_harabasz_index'] += kmeans_result['kmeans']['calinski_harabasz_index']
-                total_scores['kmeans']['silhouette_score'] += kmeans_result['kmeans']['silhouette_score']
-
-                total_scores['dbscan']['davies_bouldin_index'] += dbscan_result['evaluation']['davies_bouldin_index']
-                total_scores['dbscan']['calinski_harabasz_index'] += dbscan_result['evaluation']['calinski_harabasz_index']
-                total_scores['dbscan']['silhouette_score'] += dbscan_result['evaluation']['silhouette_score']
-
-                total_scores['agglomerative']['davies_bouldin_index'] += agglomerative_result['agglomerative']['davies_bouldin_index']
-                total_scores['agglomerative']['calinski_harabasz_index'] += agglomerative_result['agglomerative']['calinski_harabasz_index']
-                total_scores['agglomerative']['silhouette_score'] += agglomerative_result['agglomerative']['silhouette_score']
-
-        # Hitung total skor keseluruhan
-        overall_scores = {alg: sum(scores.values()) for alg, scores in total_scores.items()}
-
-        return jsonify({'total_scores': total_scores, 'overall_scores': overall_scores})
 
     except Exception as e:
         return jsonify({'error': str(e)}), 400
