@@ -7,12 +7,12 @@ from sklearn.metrics import silhouette_score, davies_bouldin_score, calinski_har
 
 def plot_k_distance_graph(data_array, k=3):
     """
-    Parameters:
-        data_array (np.ndarray): Data clustering dalam bentuk array.
-        k (int): Jumlah tetangga terdekat yang akan dihitung.
+        Parameters:
+            data_array (np.ndarray): Data clustering dalam bentuk array.
+            k (int): Jumlah tetangga terdekat yang akan dihitung.
 
-    Returns:
-        str: Base64 string dari plot.
+        Returns:
+            str: Base64 string dari plot.
     """
     # Hitung k-distance menggunakan NearestNeighbors
     nearest_neighbors = NearestNeighbors(n_neighbors=k)
@@ -38,6 +38,18 @@ def plot_k_distance_graph(data_array, k=3):
     return plot_base64
 
 def find_optimal_dbscan_params(data, eps_range, min_pts_range):
+    """
+        Fungsi untuk mencari parameter optimal (eps dan min_pts) untuk algoritma DBSCAN
+        berdasarkan evaluasi metrik clustering.
+
+        Parameter:
+        data : Dataset yang akan di-cluster.
+        eps_range : Rentang nilai untuk parameter eps (radius lingkungan).
+        min_pts_range : Rentang nilai untuk parameter min_pts (minimum titik untuk membentuk cluster).
+
+        Mengembalikan:
+        list: Daftar hasil evaluasi dengan kombinasi parameter dan metrik clustering.
+    """
     results = []
 
     for eps in eps_range:
@@ -122,14 +134,14 @@ def find_optimal_dbscan_params(data, eps_range, min_pts_range):
 
 def calculate_centroids(data, labels):
     """
-    Menghitung centroid dari setiap kluster yang dihasilkan oleh DBSCAN.
+        Menghitung centroid dari setiap kluster yang dihasilkan oleh DBSCAN.
 
-    Parameters:
-        data (np.ndarray): Data clustering dalam bentuk array (dimensi 2).
-        labels (list or np.ndarray): Label hasil clustering DBSCAN untuk setiap titik data.
+        Parameters:
+            data (np.ndarray): Data clustering dalam bentuk array (dimensi 2).
+            labels (list or np.ndarray): Label hasil clustering DBSCAN untuk setiap titik data.
 
-    Returns:
-        dict: Dictionary yang berisi centroid untuk setiap kluster dalam format {cluster_id: centroid_array}.
+        Returns:
+            dict: Dictionary yang berisi centroid untuk setiap kluster dalam format {cluster_id: centroid_array}.
     """
     unique_labels = set(labels)
     centroids = {}
@@ -167,42 +179,80 @@ def evaluate_clustering_dbscan(data, labels):
 
 class DBSCAN:
     def __init__(self, eps, min_pts):
+        """
+            Inisialisasi algoritma DBSCAN.
+            
+            Parameter:
+            eps (float): Jarak maksimum antara dua titik agar dianggap sebagai tetangga.
+            min_pts (int): Jumlah minimum titik yang diperlukan untuk membentuk daerah padat (core point).
+        """
         self.eps = eps
         self.min_pts = min_pts
         self.labels = []
 
     def fit(self, data):
+        """
+            Terapkan clustering DBSCAN pada data yang diberikan.
+
+            Parameter:
+            data (list atau ndarray): Dataset yang akan dikelompokkan.
+
+            Mengembalikan:
+            list: Label cluster untuk setiap titik dalam data.
+        """
         self.labels = [0] * len(data)
         cluster_id = 0
 
         for point_idx in range(len(data)):
-            if self.labels[point_idx] != 0:  # Already processed
+            if self.labels[point_idx] != 0:
                 continue
             neighbors = self.region_query(data, point_idx)
             if len(neighbors) < self.min_pts:
-                self.labels[point_idx] = -1  # Mark as noise
+                self.labels[point_idx] = -1  # Tandai titik sebagai noise (label = -1)
             else:
-                cluster_id += 1
+                cluster_id += 1 # Tambahkan ID cluster untuk cluster baru
+                # Perluas cluster dari titik saat ini
                 self.expand_cluster(data, point_idx, neighbors, cluster_id)
         return self.labels
 
     def expand_cluster(self, data, point_idx, neighbors, cluster_id):
+        """
+            Perluas cluster secara rekursif dengan menambahkan semua titik yang dapat dijangkau.
+
+            Parameter:
+            data (list atau ndarray): Dataset yang akan dikelompokkan.
+            point_idx (int): Indeks titik awal untuk cluster.
+            neighbors (list): Daftar tetangga dari titik awal.
+            cluster_id (int): ID cluster saat ini.
+        """
         self.labels[point_idx] = cluster_id
         i = 0
         while i < len(neighbors):
             neighbor_idx = neighbors[i]
-            if self.labels[neighbor_idx] == -1:  # Previously marked noise
+            if self.labels[neighbor_idx] == -1: # Jika sebelumnya ditandai sebagai noise
                 self.labels[neighbor_idx] = cluster_id
-            elif self.labels[neighbor_idx] == 0:
+            elif self.labels[neighbor_idx] == 0: # Jika titik belum diproses
                 self.labels[neighbor_idx] = cluster_id
+                # Cari tetangga dari titik tetangga
                 new_neighbors = self.region_query(data, neighbor_idx)
                 if len(new_neighbors) >= self.min_pts:
-                    neighbors += new_neighbors
+                    neighbors += new_neighbors # Tambahkan tetangga baru ke daftar
             i += 1
 
     def region_query(self, data, point_idx):
+        """
+            Cari semua titik di lingkungan sebuah titik berdasarkan jarak eps.
+
+            Parameter:
+            data (list atau ndarray): Dataset yang akan dikelompokkan.
+            point_idx (int): Indeks titik yang sedang diperiksa.
+
+            Mengembalikan:
+            list: Indeks titik-titik dalam radius lingkungan.
+        """
         neighbors = []
         for i in range(len(data)):
+            # Hitung jarak Euclidean antara titik saat ini dan titik lainnya
             if np.linalg.norm(data[point_idx] - data[i]) <= self.eps:
                 neighbors.append(i)
         return neighbors
