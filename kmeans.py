@@ -5,7 +5,7 @@ from sklearn.metrics import silhouette_score, davies_bouldin_score, calinski_har
 # Import Plot
 from sklearn.cluster import KMeans
 import matplotlib
-matplotlib.use('Agg')
+matplotlib.use('Agg') # Gunakan backend non-interaktif untuk menyimpan gambar
 import matplotlib.pyplot as plt
 import io
 import base64
@@ -108,12 +108,3 @@ def find_optimal_k_sklearn(data, max_k=10):
     plt.close()
 
     return plot_url, distortions
-
-# Fungsi Elbow Method Scratch
-# def find_optimal_k(data, max_k=10):
-#     distortions = []
-#     for k in range(1, max_k + 1):
-#         centroids, clusters = k_means_clustering(data, k)
-#         intra_cluster_distances = np.min(cdist(data, centroids, 'euclidean'), axis=1)
-#         distortions.append(np.sum(intra_cluster_distances ** 2))
-#     return distortions
