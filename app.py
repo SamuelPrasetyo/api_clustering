@@ -159,7 +159,7 @@ def elbow_method():
 @app.route('/kmeans', methods=['POST'])
 def kmeans():
     try:
-        # Ambil parameter tahun ajar dan semester dari request
+        # Ambil parameter tahun ajar, semester, dan jumlah klaster dari request
         data = request.get_json()
         tahunajar = data.get('tahunajar')
         semester = data.get('semester')
@@ -169,7 +169,7 @@ def kmeans():
         if not tahunajar or not semester or not n_clusters:
             return jsonify({'error': 'Parameter tahunajar, semester, dan n_clusters harus disediakan.'}), 400
         
-         # Validasi n_clusters adalah bilangan positif
+        # Validasi n_clusters adalah bilangan positif
         try:
             n_clusters = int(n_clusters)
             if n_clusters <= 0:
@@ -215,7 +215,7 @@ def kmeans():
         centroids, clusters = k_means_clustering(data, n_clusters)
         
         # Evaluasi hasil clustering
-        evaluation = evaluate_clustering_kmeans(data, clusters, centroids)
+        evaluation = evaluate_clustering_kmeans(data, clusters)
 
         # Tambahkan hasil clustering ke DataFrame metadata
         metadata['Cluster'] = clusters
@@ -269,6 +269,8 @@ def find_params():
         clustering_columns = df.columns.difference(metadata_columns)
 
         clustering_data = df[clustering_columns]
+        
+        # Pastikan data numerik valid
         for column in clustering_columns:
             clustering_data.loc[:, column] = pd.to_numeric(clustering_data[column], errors='coerce')
 

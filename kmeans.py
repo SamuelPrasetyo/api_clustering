@@ -68,19 +68,15 @@ def k_means_clustering(data, k, max_iters=100):
 
 
 """ Fungsi Evaluasi Clustering """
-def evaluate_clustering_kmeans(data, clusters, centroids):
+def evaluate_clustering_kmeans(data, clusters):
     silhouette_avg = silhouette_score(data, clusters)
     davies_bouldin = davies_bouldin_score(data, clusters)
     calinski_harabasz = calinski_harabasz_score(data, clusters)
 
-    # Hitung Sum of Squared Error (SSE)
-    sse = np.sum(np.min(cdist(data, centroids, 'euclidean') ** 2, axis=1))
-
     return {
         "silhouette_score": silhouette_avg,
         "davies_bouldin_index": davies_bouldin,
-        "calinski_harabasz_index": calinski_harabasz,
-        "sum_squared_error": sse
+        "calinski_harabasz_index": calinski_harabasz
     }
 
 
